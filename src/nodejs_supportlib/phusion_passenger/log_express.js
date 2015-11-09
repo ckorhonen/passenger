@@ -104,8 +104,20 @@ function logRequest(req, res, next) {
 	reqNamespace.bindEmitter(req);
 	reqNamespace.bindEmitter(res);
 
+	// The Passenger core has an open transaction associated with the request, to which we can attach info from node instrumentation.
 	ustLog.logToUstTransaction("requests", logBuf, attachToTxnId);
 
+	// However, logToUstTransaction() communicates async with the ustrouter, and is not guaranteed to deliver before the application response arrives 
+	// back to the core (at which point the core will close the transaction and later additions will not be taken into account).
+	// That's why we intercept response.end() (from the doc: the method, response.end(), MUST be called on each response), so we can defer it
+	// until we are sure the ustrouter is aware of any attachments generated during the request handling.
+	res._passenger_wrapped_end = res.end;
+	res.end = function() {
+		return ustLog.deferIfPendingTxns(attachToTxnId, this, res._passenger_wrapped_end, arguments);
+	};
+
+	// Make request transaction ID available for other instrumentation modules, e.g. mongo doesn't know about requests (which is how the core passes
+	// txn ID).
 	reqNamespace.run(function() {
 		reqNamespace.set("attachToTxnId", attachToTxnId);
 		next();
