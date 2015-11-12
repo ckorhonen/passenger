@@ -82,21 +82,21 @@ exports.attachToRequest = function(req, res, next) {
 	}
 }
 
-exports.logTimedActivityGeneric = function(activityName, activityNameShort, tBegin, tEnd, message) {
-	logTimedActivity(activityName, activityNameShort, tBegin, tEnd, "generic", { "message": message });
+exports.logTimedActivityGeneric = function(activityName, tBegin, tEnd, message) {
+	logTimedActivity(activityName, tBegin, tEnd, "generic", { "message": message });
 }
 
 exports.logTimedActivityMongo = function(activityName, tBegin, tEnd, query) {
-	logTimedActivity(activityName, "DB", tBegin, tEnd, "mongo", { "query": query });
+	logTimedActivity(activityName, tBegin, tEnd, "mongo", { "query": query });
 }
 
 exports.logTimedActivitySQL = function(activityName, tBegin, tEnd, query) {
-	logTimedActivity(activityName, "DB", tBegin, tEnd, "sql", { "query": query });
+	logTimedActivity(activityName, tBegin, tEnd, "sql", { "query": query });
 }
 
-function logTimedActivity(activityName, activityNameShort, tBegin, tEnd, dataType, dataObj) {
+function logTimedActivity(activityName, tBegin, tEnd, dataType, dataObj) {
 	try {
-		log.debug("ustReporter: logTimedActivity(activityName: " + activityName + " (" + activityNameShort + "))");
+		log.debug("ustReporter: logTimedActivity(activityName: " + activityName + ")");
 		var attachToTxnId = getCurrentTxnId();
 		if (!attachToTxnId) {
 			log.verbose("Dropping Union Station timed action log due to lack of txnId to attach to " +
@@ -105,7 +105,7 @@ function logTimedActivity(activityName, activityNameShort, tBegin, tEnd, dataTyp
 		}
 
 		var uniqueTag = codify.toCode(tBegin);
-		var extraInfo = JSON.stringify({ "name": activityName, "name_short": activityNameShort, "data_type": dataType, "data": dataObj });
+		var extraInfo = JSON.stringify({ "name": activityName, "data_type": dataType, "data": dataObj });
 		var logBuf = [];
 		logBuf.push("BEGIN: " + activityName + " " + uniqueTag + " (" + codify.toCode(tBegin) + ") " + new Buffer(extraInfo).toString('base64'));
 		logBuf.push("END: " + activityName + " " + uniqueTag + " (" + codify.toCode(tEnd) + ")");
