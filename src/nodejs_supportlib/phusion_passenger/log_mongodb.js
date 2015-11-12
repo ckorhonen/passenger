@@ -23,14 +23,10 @@
  *  THE SOFTWARE.
  */
 
+var ustReporter = global.phusion_passenger_ustReporter;
+
 var log;
-var codify = require('codify');
-var microtime = require('microtime');
-
-var reqNamespace = require('continuation-local-storage').getNamespace('passenger-request-ctx');
-
 var mongodb;
-var ustLog;
 
 // From http://docs.mongodb.org/manual/reference/method/js-collection/
 var collectionMethods = [
@@ -78,34 +74,21 @@ function collectionFn(origArguments, databaseName, collectionName, functionName,
 	}
 	query = "'" + databaseName + "'.collection['" + collectionName + "']." + functionName + "(" + query + ")";
 
-	var tBegin = microtime.now();
+	var tBegin = ustReporter.nowTimestamp();
 	var rval = originalFn.apply(this, origArguments);
-	var tEnd = microtime.now();
+	var tEnd = ustReporter.nowTimestamp();
 
-	// var reqNamespace = localStorage.getNamespace('passenger-request-ctx');
-	var attachToTxnId = reqNamespace.get("attachToTxnId");
-	log.verbose("==== Instrumentation [MongoDB] ==== [" + query + "] (attach to txnId " + attachToTxnId + ")");
+	log.verbose("==== Instrumentation [MongoDB] ==== [" + query + "] (attach to txnId " + ustReporter.getCurrentTxnId() + ")");
 	
-	if (!attachToTxnId) {
-		log.verbose("Dropping Union Station log due to lack of txnId to attach to (either request was not intercepted or temporary UstRouter failure).");
-		console.trace("Call stack:");
-		return rval;
-	}
-
-	var logBuf = [];
-	var uniqueTag = codify.toCode(tBegin);
-	logBuf.push("BEGIN: DB BENCHMARK: mongodb " + uniqueTag + " (" + codify.toCode(tBegin) + ") " + new Buffer(friendlyName + "\n" + query).toString('base64'));
-	logBuf.push("END: DB BENCHMARK: mongodb " + uniqueTag + " (" + codify.toCode(tEnd) + ")");
-
-	ustLog.logToUstTransaction("requests", logBuf, attachToTxnId);
-
+	ustReporter.logTimedActivityMongo("mongo: " + query, tBegin, tEnd, query);
+	
 	return rval;
 }
 
-exports.initPreLoad = function(logger, appRoot, ustLogger) {
-	log = logger;
-	ustLog = ustLogger;
-
+exports.initPreLoad = function() {
+	log = ustReporter.getPassengerLogger();
+	var appRoot = ustReporter.getApplicationRoot();
+	
 	// See if the mongodb driver is used. It can also be used through mongoskin, in which case older mongoskin
 	// versions will have it as part of their own node_modules.
 	try {
@@ -146,7 +129,7 @@ function wrapRepairCLSMongo14() {
 		mongodb.Db.prototype._passenger_wrapped__executeQueryCommand = mongodb.Db.prototype._executeQueryCommand;
 		mongodb.Db.prototype._executeQueryCommand = function() {
 			if (arguments.length > 0 && typeof(arguments[arguments.length - 1]) === 'function') {
-				var callback = reqNamespace.bind(arguments[arguments.length - 1]);
+				var callback = ustReporter.getCLSWrappedCallback(arguments[arguments.length - 1]);
 				var newArgs = [];
 				for (var i = 0; i < arguments.length - 1; i++) {
 					newArgs.push(arguments[i]);
@@ -161,7 +144,7 @@ function wrapRepairCLSMongo14() {
 		mongodb.Db.prototype._passenger_wrapped__executeInsertCommand = mongodb.Db.prototype._executeInsertCommand;
 		mongodb.Db.prototype._executeInsertCommand = function() {
 			if (arguments.length > 0 && typeof(arguments[arguments.length - 1]) === 'function') {
-				var callback = reqNamespace.bind(arguments[arguments.length - 1]);
+				var callback = ustReporter.getCLSWrappedCallback(arguments[arguments.length - 1]);
 				var newArgs = [];
 				for (var i = 0; i < arguments.length - 1; i++) {
 					newArgs.push(arguments[i]);
@@ -201,8 +184,7 @@ function wrapRepairCLSMongoskinUtils(appRoot) {
 			skinClass.prototype._passenger_wrapped_open = skinClass.prototype.open;
 			skinClass.prototype.open = function(callback) {
 				// Finally we can bind the callback so that when the emitter calls it, the cls is mapped correctly.
-				// var reqNamespace = localStorage.getNamespace('passenger-request-ctx');
-				return skinClass.prototype._passenger_wrapped_open.call(this, reqNamespace.bind(callback));
+				return skinClass.prototype._passenger_wrapped_open.call(this, ustReporter.getCLSWrappedCallback(callback));
 			}
 	
 			return skinClass;

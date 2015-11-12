@@ -151,10 +151,6 @@ function onEnd() {
 	resetState("onEnd");
 }
 
-exports.getTxnIdFromRequest = function(req) {
-	return req.headers['passenger-txn-id'];
-}
-
 function LogTransaction(cat) {
 	this.timestamp = microtime.now();
 	this.category = cat;
@@ -274,7 +270,7 @@ function pushPendingData() {
 			changeState(7); // expect ok in onData()..
 			setWatchdog(connTimeoutMs);
 			writeLenArray(routerConn, "closeTransaction\0" + txn.txnId + "\0" + codify.toCode(microtime.now()) + "\0true\0");
-			log.verbose("wrote log and close for " + txn.txnId);
+			log.debug("wrote log and close for " + txn.txnId);
 			break;
 		
 		default:

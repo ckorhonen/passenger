@@ -23,18 +23,17 @@
  *  THE SOFTWARE.
  */
 
+var ustReporter = global.phusion_passenger_ustReporter;
+
 var log;
 var express;
-var ustLog;
-
-var reqNamespace = require('continuation-local-storage').getNamespace('passenger-request-ctx');
 
 var applicationThis;
 
-exports.initPreLoad = function(logger, appRoot, ustLogger) {
-	log = logger;
-	ustLog = ustLogger;
-
+exports.initPreLoad = function() {
+	log = ustReporter.getPassengerLogger();
+	var appRoot = ustReporter.getApplicationRoot();
+	
 	try {
 		express = require(appRoot + "/node_modules/express");
 	} catch (e) {
@@ -90,53 +89,16 @@ exports.initPostLoad = function() {
 }
 
 function logRequest(req, res, next) {
-	var attachToTxnId = ustLog.getTxnIdFromRequest(req);
-	log.verbose("==== Instrumentation [Express] ==== REQUEST [" + req.method + " " + req.url + "] (attach to txnId " + attachToTxnId + ")");
-
-	if (!attachToTxnId) {
-		log.debug("Dropping Union Station log due to lack of txnId from Passenger Core (probably a temporary UstRouter failure)");
-		return next();
-	}
-	
-	var logBuf = [];
-	logBuf.push("Got request for: " + req.url);
-
-	reqNamespace.bindEmitter(req);
-	reqNamespace.bindEmitter(res);
-
-	// The Passenger core has an open transaction associated with the request, to which we can attach info from node instrumentation.
-	ustLog.logToUstTransaction("requests", logBuf, attachToTxnId);
-
-	// However, logToUstTransaction() communicates async with the ustrouter, and is not guaranteed to deliver before the application response arrives 
-	// back to the core (at which point the core will close the transaction and later additions will not be taken into account).
-	// That's why we intercept response.end() (from the doc: the method, response.end(), MUST be called on each response), so we can defer it
-	// until we are sure the ustrouter is aware of any attachments generated during the request handling.
-	res._passenger_wrapped_end = res.end;
-	res.end = function() {
-		return ustLog.deferIfPendingTxns(attachToTxnId, this, res._passenger_wrapped_end, arguments);
-	};
-
-	// Make request transaction ID available for other instrumentation modules, e.g. mongo doesn't know about requests (which is how the core passes
-	// txn ID).
-	reqNamespace.run(function() {
-		reqNamespace.set("attachToTxnId", attachToTxnId);
-		next();
-	});
+	log.verbose("==== Instrumentation [Express] ==== REQUEST [" + req.method + " " + req.url + "] attach");
+	ustReporter.attachToRequest(req, res, next);
 }
 
 function logException(err, req, res, next) {
 	// We may have multiple exception handlers in the routing chain, ensure only the first one actually logs.
 	if (!res.hasLoggedException) {
-		log.verbose("==== Instrumentation [Express] ==== EXCEPTION + TRACE FOR [" + req.url + "] (new txn)");
-
-		var logBuf = [];
-		logBuf.push("Request transaction ID: " + ustLog.getTxnIdFromRequest(req));
-		logBuf.push("Message: " + new Buffer(err.message).toString('base64'));
-		logBuf.push("Class: " + err.name);
-		logBuf.push("Backtrace: " + new Buffer(err.stack).toString('base64'));
-		//logBuf.push("Controller action: ?");
-
-		ustLog.logToUstTransaction("exceptions", logBuf);
+		log.verbose("==== Instrumentation [Express] ==== EXCEPTION + TRACE FOR [" + req.url + "]");
+			
+		ustReporter.logException(err.name, err.message, err.stack);
 
 		res.hasLoggedException = true;
 	}

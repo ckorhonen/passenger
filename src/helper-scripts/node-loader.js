@@ -123,7 +123,12 @@ function setupEnvironment(options) {
 		PhusionPassenger.options.ust_router_password, PhusionPassenger.options.union_station_key, PhusionPassenger.options.app_group_name);
 
 	if (ustLog.isEnabled()) {
+		// must be first so other modules can use the cls context
 		require('continuation-local-storage').createNamespace('passenger-request-ctx');
+		
+		global.phusion_passenger_ustReporter = require('phusion_passenger/ustreporter');
+		global.phusion_passenger_ustReporter.init(logger, options.app_root, ustLog);
+		
 		instrumentModulePaths.forEach(function(modulePath) {
 			var module = require(modulePath);
 			instrumentedModules.push(module);
